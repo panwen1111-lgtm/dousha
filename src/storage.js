@@ -95,8 +95,21 @@ function renameProject(oldName, newName) {
     const oldPath = path.join(projectsDir, oldName);
     const newPath = path.join(projectsDir, newName);
     if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-        fs.renameSync(oldPath, newPath);
-        return true;
+        try {
+            fs.renameSync(oldPath, newPath);
+            return true;
+        } catch (e) {
+            console.error('[RENAME_PROJECT_ERROR]', e);
+            try {
+                // Fallback for Windows EPERM
+                fs.cpSync(oldPath, newPath, { recursive: true });
+                fs.rmSync(oldPath, { recursive: true, force: true });
+                return true;
+            } catch (fallbackErr) {
+                console.error('[RENAME_PROJECT_FALLBACK_ERROR]', fallbackErr);
+                return false;
+            }
+        }
     }
     return false;
 }
@@ -112,6 +125,156 @@ function readProjectSettings(name) {
     return null;
 }
 
+function readProjectAssets(name) {
+    const projPath = path.join(projectsDir, name);
+    const assetsPath = path.join(projPath, 'assets.json');
+    try {
+        if (fs.existsSync(assetsPath)) {
+            const data = JSON.parse(fs.readFileSync(assetsPath, 'utf8'));
+            // Dynamically patch paths to self-heal moved directories
+            const assetsDirUrl = 'file://' + path.join(projPath, 'assets_files').replace(/\\/g, '/');
+            const patchedData = {};
+            for (const category in data) {
+                patchedData[category] = data[category].map(asset => {
+                    if (asset.path) {
+                        const fileName = asset.path.split('/').pop();
+                        asset.path = `${assetsDirUrl}/${fileName}`;
+                    }
+                    if (asset.audio) {
+                        if (typeof asset.audio === 'string') {
+                            const audioFileName = asset.audio.split('/').pop();
+                            asset.audio = `${assetsDirUrl}/${audioFileName}`;
+                        } else if (asset.audio.path) {
+                            const audioFileName = asset.audio.path.split('/').pop();
+                            asset.audio.path = `${assetsDirUrl}/${audioFileName}`;
+                        }
+                    }
+                    return asset;
+                });
+            }
+            return patchedData;
+        }
+    } catch (e) { }
+    // Default structure Return
+    return { protagonist: [], supporting: [], scene: [], prop: [] };
+}
+
+function saveProjectAssets(name, assetsData) {
+    const projPath = path.join(projectsDir, name);
+    const assetsPath = path.join(projPath, 'assets.json');
+    if (fs.existsSync(projPath)) {
+        fs.writeFileSync(assetsPath, JSON.stringify(assetsData, null, 2), 'utf8');
+        return true;
+    }
+    return false;
+}
+
+function copyFileToProject(projectName, sourceFilePath, targetFileName) {
+    const projPath = path.join(projectsDir, projectName);
+    const targetDir = path.join(projPath, 'assets_files');
+    if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const ext = path.extname(sourceFilePath);
+    const finalName = targetFileName + ext;
+    const finalPath = path.join(targetDir, finalName);
+    fs.copyFileSync(sourceFilePath, finalPath);
+    return `file://${finalPath.replace(/\\/g, '/')}`;
+}
+
+
+
+function listEpisodes(projectName) {
+    const projPath = path.join(projectsDir, projectName);
+    if (!fs.existsSync(projPath)) return [];
+    try {
+        const dirs = fs.readdirSync(projPath, { withFileTypes: true });
+        const episodes = [];
+        for (const dirent of dirs) {
+            if (dirent.isDirectory() && dirent.name !== 'assets_files') {
+                const epPath = path.join(projPath, dirent.name, 'episode_data.json');
+                let createdAt = 0;
+                if (fs.existsSync(epPath)) {
+                    try {
+                        const data = JSON.parse(fs.readFileSync(epPath, 'utf8'));
+                        createdAt = data.createdAt || 0;
+                    } catch(e) {}
+                }
+                episodes.push({
+                    name: dirent.name,
+                    createdAt: createdAt
+                });
+            }
+        }
+        episodes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return episodes;
+    } catch (e) {
+        return [];
+    }
+}
+
+function createEpisode(projectName, episodeName) {
+    const epPath = path.join(projectsDir, projectName, episodeName);
+    if (!fs.existsSync(epPath)) {
+        fs.mkdirSync(epPath, { recursive: true });
+        fs.writeFileSync(path.join(epPath, 'episode_data.json'), JSON.stringify({
+            createdAt: Date.now(),
+            script: '',
+            shots: []
+        }, null, 2), 'utf8');
+        return true;
+    }
+    return false;
+}
+
+function deleteEpisode(projectName, episodeName) {
+    const epPath = path.join(projectsDir, projectName, episodeName);
+    if (fs.existsSync(epPath)) {
+        fs.rmSync(epPath, { recursive: true, force: true });
+        return true;
+    }
+    return false;
+}
+
+function renameEpisode(projectName, oldName, newName) {
+    const oldPath = path.join(projectsDir, projectName, oldName);
+    const newPath = path.join(projectsDir, projectName, newName);
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+        try {
+            fs.renameSync(oldPath, newPath);
+            return true;
+        } catch (e) {
+            console.error('[RENAME_EPISODE_ERROR]', e);
+            try {
+                // Fallback for Windows EPERM
+                fs.cpSync(oldPath, newPath, { recursive: true });
+                fs.rmSync(oldPath, { recursive: true, force: true });
+                return true;
+            } catch (fallbackErr) {
+                console.error('[RENAME_EPISODE_FALLBACK_ERROR]', fallbackErr);
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+function readEpisodeData(projectName, episodeName) {
+    const epPath = path.join(projectsDir, projectName, episodeName, 'episode_data.json');
+    try {
+        if (fs.existsSync(epPath)) {
+            return JSON.parse(fs.readFileSync(epPath, 'utf8'));
+        }
+    } catch (e) { }
+    return { createdAt: Date.now(), script: '', shots: [] };
+}
+
+function saveEpisodeData(projectName, episodeName, data) {
+    const epPath = path.join(projectsDir, projectName, episodeName);
+    if (!fs.existsSync(epPath)) return false;
+    fs.writeFileSync(path.join(epPath, 'episode_data.json'), JSON.stringify(data, null, 2), 'utf8');
+    return true;
+}
 
 module.exports = {
     initDirectories,
@@ -122,5 +285,14 @@ module.exports = {
     deleteProject,
     renameProject,
     readProjectSettings,
+    readProjectAssets,
+    saveProjectAssets,
+    copyFileToProject,
+    listEpisodes,
+    createEpisode,
+    deleteEpisode,
+    renameEpisode,
+    readEpisodeData,
+    saveEpisodeData,
     projectsDir
 };

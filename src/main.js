@@ -92,6 +92,91 @@ ipcMain.handle('read-project-settings', async (event, name) => {
     return storage.readProjectSettings(name);
 });
 
+ipcMain.handle('save-project-settings', async (event, name, settings) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const settingsPath = path.join(storage.projectsDir, name, 'project_settings.json');
+        const existing = storage.readProjectSettings(name) || {};
+        fs.writeFileSync(settingsPath, JSON.stringify(Object.assign(existing, settings), null, 2), 'utf8');
+        return true;
+    } catch(e) {
+        console.error('save-project-settings error', e);
+        return false;
+    }
+});
+
+ipcMain.handle('read-project-assets', async (event, name) => {
+    return storage.readProjectAssets(name);
+});
+
+ipcMain.handle('save-project-assets', async (event, name, data) => {
+    return storage.saveProjectAssets(name, data);
+});
+
+ipcMain.handle('copy-file-to-project', async (event, projectName, sourceFilePath, targetFileName) => {
+    try {
+        return storage.copyFileToProject(projectName, sourceFilePath, targetFileName);
+    } catch (e) {
+        console.error("Copy file error", e);
+        return null;
+    }
+});
+
+// New handler: renderer passes raw bytes (ArrayBuffer) so we avoid path trust issues
+ipcMain.handle('write-asset-file', async (event, projectName, fileName, arrayBuffer) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const targetDir = path.join(storage.projectsDir, projectName, 'assets_files');
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const finalPath = path.join(targetDir, fileName);
+        fs.writeFileSync(finalPath, Buffer.from(arrayBuffer));
+        return `file://${finalPath.replace(/\\/g, '/')}`;
+    } catch (e) {
+        console.error('write-asset-file error', e);
+        return null;
+    }
+});
+
+ipcMain.handle('read-asset-as-base64', async (event, projectName, fileName) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const filePath = path.join(storage.projectsDir, projectName, 'assets_files', fileName);
+        if (!fs.existsSync(filePath)) return null;
+        const buffer = fs.readFileSync(filePath);
+        return buffer.toString('base64');
+    } catch (e) {
+        console.error('read-asset-as-base64 error', e);
+        return null;
+    }
+});
+
+ipcMain.handle('list-episodes', async (event, projectName) => {
+    return storage.listEpisodes(projectName);
+});
+
+ipcMain.handle('create-episode', async (event, projectName, episodeName) => {
+    return storage.createEpisode(projectName, episodeName);
+});
+
+ipcMain.handle('delete-episode', async (event, projectName, episodeName) => {
+    return storage.deleteEpisode(projectName, episodeName);
+});
+
+ipcMain.handle('rename-episode', async (event, projectName, oldName, newName) => {
+    return storage.renameEpisode(projectName, oldName, newName);
+});
+
+ipcMain.handle('read-episode-data', async (event, projectName, episodeName) => {
+    return storage.readEpisodeData(projectName, episodeName);
+});
+
+ipcMain.handle('save-episode-data', async (event, projectName, episodeName, data) => {
+    return storage.saveEpisodeData(projectName, episodeName, data);
+});
+
 const aiService = require('./ai_service');
 
 // Handle proxying commands to B Window
